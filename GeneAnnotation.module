@@ -35,6 +35,41 @@ function strip($string) {
     return $string;     
 }     
 
+function ClientLogin($service,$user,$pass) {
+    
+/* 
+ * the problem is the f'ing proxy again!?! - should have this in variable_set?!?
+ * - i.e. don't want to use it eslewhere?!?
+ *      $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $path);
+        curl_setopt($ch, CURLOPT_FAILONERROR,1);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION,1);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER,1);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+        ///// since this runs on treason etc., you must go via webproxy to make it work!?!?
+        curl_setopt($ch, CURLOPT_PROXY, "www-proxy.ebi.ac.uk");
+        curl_setopt($ch, CURLOPT_PROXYPORT, 3128);
+        $retValue = curl_exec($ch);                      
+        curl_close($ch);
+ */
+    return trim(`curl -x www-proxy.ebi.ac.uk:3128 -s -d Email=$user -d Passwd=$pass -d service=$service https://www.google.com/accounts/ClientLogin | tr ' ' \\n | grep Auth= | sed -e 's/Auth=//'`);
+    // return "curl -x www-proxy.ebi.ac.uk:3128 -s -d Email=$user -d Passwd=$pass -d service=$service https://www.google.com/accounts/ClientLogin";
+    // return "curl -s -d Email=$user -d Passwd=$pass -d service=$service https://www.google.com/accounts/ClientLogin | tr ' ' \\n | grep Auth= | sed -e 's/Auth=//'";
+}
+
+///// may be case that php may be linked against a more up-to-date libcurl?!?
+function FusionTableQuery($user,$pass,$service,$url,$sql) {
+    $auth=ClientLogin($service,$user,$pass);
+    ///// seems we have a v. old version of curl on treason?!? so instead of using --data-urlencode we'll just use POST?!? - while the documentation says to use GET/POST in difference situations
+    ///// seems both are fine?!?
+    // $cmd="curl -x www-proxy.ebi.ac.uk:3128 -L -s -H \"Authorization: GoogleLogin auth=$auth\" --data-urlencode sql=\"$sql\" $url";
+    $cmd="curl -x www-proxy.ebi.ac.uk:3128 -L -s -H \"Authorization: GoogleLogin auth=$auth\" -d sql=\"$sql\" $url";
+    $out=`$cmd | grep -v Gene_Cap_ID`;
+    $rs=explode(",",trim($out));
+    return($rs);
+}
+
+
 // set up the global vars
 function GeneAnnotation_init() {
 
@@ -68,6 +103,11 @@ function GeneAnnotation_init() {
     variable_set('auto_scfnames', $inifile['AUTOSCFNAMESFILE']); // goes in base dir - has All names for autocompletion (not sure if keeping?!?)
     variable_set('tabix',    $inifile['TABIX']); // extracts from variable_get('basedir').'/gff/'.$species.'.gff.gz'; into $basedir.'/tmp/'
     variable_set('gene_indexer',    $inifile['GENE_INDEXER']); // extracts from variable_get('basedir').'/gff/'.$species.'.gff.gz'; into $basedir.'/tmp/'
+    variable_set('cap_meta_table',  $inifile['CAP_META_TABLE']);
+    variable_set('cap_meta_url',  $inifile['CAP_META_URL']);
+    variable_set('cap_meta_user',  $inifile['CAP_META_USER']);
+    variable_set('cap_meta_pass',  $inifile['CAP_META_PASS']);
+    variable_set('cap_meta_service',  $inifile['CAP_META_SERVICE']);
 }
 
 // By implementing hook_help(), a module can make documentation available to the user for the module as a whole, or for specific paths.
@@ -258,6 +298,11 @@ function cap_frontpage() {
         drupal_get_path('module', 'GeneAnnotation') . '/css/box.css', 
         array('group' => CSS_DEFAULT, 'every_page' => TRUE)
     ); 
+
+    drupal_add_css(
+        drupal_get_path('module', 'GeneAnnotation') . '/css/tablescroll.css', 
+    array('group' => CSS_DEFAULT, 'every_page' => TRUE)
+    );
 
     $output = drupal_render($build);
 
@@ -627,6 +672,7 @@ function gene_info_submission_form($form, &$form_state) { // the error was all t
     $species = variable_get('species_metau');
     // $species = variable_get('species');
 
+    ///////////////////////////////////////////////////// put in the gene id textbox
     $form['howmany_select'] = array(
         '#title' => t('Gene ID'),
         '#type' => 'textfield',
@@ -656,6 +702,7 @@ function gene_info_submission_form($form, &$form_state) { // the error was all t
         $form['howmany_select']['#default_value'] = t('Log in to use this!');
     }
 
+    ///////////////////////////////////////////////////// put in the actual meta data form
     $form['gene_info'] = array(
         '#title' => t("Gene Information Form"),
         // The prefix/suffix provide the div that we're replacing, named by
@@ -671,7 +718,58 @@ function gene_info_submission_form($form, &$form_state) { // the error was all t
     ////// only thing really worth checking here is if we know what the gene name is - i.e. additional message to say make sure you know what you're doing?!?
     $ret=-2;
     $gene_id = '';
+    ////// don't want this stuff in the main routine - i.e. required for page loading?!?
+    if(!empty($form_state['values']['howmany_select'])) {
+        $gene_id = $form_state['values']['howmany_select'];
+        $c_user=variable_get('cap_meta_user');
+        $c_pass=variable_get('cap_meta_pass');
+        $c_url=variable_get('cap_meta_url');
+        $c_table=variable_get('cap_meta_table');
+        $c_service=variable_get('cap_meta_service');
 
+//        $auth = ClientLogin($c_service,$c_user,$c_pass);
+        // $auth=`$auth`;
+
+        $response = FusionTableQuery (
+            $c_user,
+            $c_pass,$c_service,
+            $c_url,"SELECT Submitter,Gene_Cap_ID,Gene_Canon_ID,Species_Version,Meta_Data_Status,Gene_Status,Gene_Status_Just,Gene_Symbol,Gene_Symbol_Just,Gene_Synonyms,Gene_Synonyms_Just,Gene_Description,Gene_Description_Just,Gene_Family,PMIDs,Submitter_Comments FROM $c_table where Gene_Cap_ID = '$gene_id'"
+        );
+                                                                                                                                                                                                                                                    
+        $p=var_dump($response);
+        $form['gene_info']['unknown'] = array(
+            '#type' => 'markup',
+            '#markup' => '<div class="ino_msgbox"><pre>what the fuck-'."\nout=".$p."\n".'-seriously</pre><div>',
+            // '#markup' => '<div class="ino_msgbox"><pre>what the fuck-'."\n".$c_service."\n".$c_user."\n".$c_pass."\n".$c_url."\n".$auth."\n".$response."\nout=".$t."\n".'-seriously</pre><div>',
+            '#attributes' => array('id' => 'species-filler'),
+        );
+        return $form;
+
+        
+        if(count($response)==1) {
+            // exit;
+            $gene_info_switch = 1;
+        } elseif (count($response)==16) {
+        //// already edited
+            // exit;
+            $ret=-1;
+            $gene_info_switch = 0;
+        } else {      
+            $form['gene_info']['unknown'] = array(
+                '#type' => 'markup',
+                '#markup' => '<div class="info_msgbox">There is a problem with remote serrver please try later - if probem continues email...</div>',
+                '#attributes' => array('id' => 'species-filler'),
+            );
+            return $form;
+        }
+
+
+    } else {
+        /// default at start?!
+        $gene_info_switch = 0;
+    }
+
+    /*
     if(!empty($form_state['values']['howmany_select'])) {
         $gene_id = $form_state['values']['howmany_select'];
         $ret=check_gene_entry($gene_id);
@@ -682,6 +780,7 @@ function gene_info_submission_form($form, &$form_state) { // the error was all t
     } else {
         $gene_info_switch = 0;
     }
+*/
 
     // open form for editing
     if($gene_info_switch) {
@@ -913,7 +1012,7 @@ function gene_info_submission_form($form, &$form_state) { // the error was all t
 
         $result = db_query("SELECT user, species_version, gene_sym, sym_just, description, desc_just, status, status_just, pmid, comments from {cap_gene_node} where gene_id = '".$gene_id."'");
 
-        foreach ($result as $row) { 
+        foreach ($result as $row) { /// only doing one row?!?
             $user = $row->user; 
             $species = $row->species; 
             $gene_sym = $row->gene_sym; 
@@ -933,59 +1032,86 @@ function gene_info_submission_form($form, &$form_state) { // the error was all t
         $form['gene_info']['table'] = array(
             '#type' => 'markup',
             '#markup' => '<div class="warning_msgbox">This Gene has already been edited. To edit the entry for this gene please contact your group representative or contact VectorBase (info-at-vectorabse.org).</div>
-            
-            <table class="fancytable">
-            <tr>
-                <td>Species</td>
-                <td>'.$species.'</td>
-            </tr>
-            <tr>
-                <td>Gene ID</td>
-                <td>'.$gene_id.'</td>
-            </tr>
-            <tr>
-                <td>Gene Symbol</td>
-                <td>'.$gene_sym.'</td>
-            </tr>
-            <tr>
-                <td>Gene Symbol Just.</td>
-                <td>'.$sym_just.'</td>
-            </tr>
-            <tr>
-                <td>Gene Status</td>
-                <td>'.$status.'</td>
-            </tr>
-            <tr>
-                <td>Gene Status Just.</td>
-                <td>'.$status_just.'</td>
-            </tr>
-            <tr>
-                <td>Gene Descriptions</td>
-                <td>'.$description.'</td>
-            </tr>
-            <tr>
-                <td>Gene Description Just.</td>
-                <td>'.$desc_just.'</td>
-            </tr>
-            <tr>
-                <td>PMID</td>
-                <td>'.$pmid.'</td>
-            </tr>
-            <tr>
-                <td>Comments.</td>
-                <td>'.$comments.'</td>
-            </tr>
-            </table>       ',
-            //'#prefix' => '<div class="ui-widget" style="width: 515px; height: 200px;">',
-            // '#suffix' => '</div>',
-            '#attributes' => array('id' => 'species-filler'),
+
+<!-- HEADER -->
+<table class="tableone" summary="This table lists flights arriving at Bristol International Airport.">
+<caption>Gene Info Table</caption>
+
+<thead>
+<tr>
+<th class="th1" scope="col">Attribute</th> 
+<th class="th2" scope="col">Value</th> 
+</tr>
+</thead>
+
+<!-- FOOTER -->
+<tfoot>
+<tr>
+<td colspan="2">DATE OF EDIT : 30 June 2012</td>
+</tr>
+</tfoot>
+
+<!-- BODY -->
+<tbody>
+<tr><td colspan="2">
+<div class="innerb">
+
+<table class="tabletwo">
+
+<tr>
+<th class="td1" scope="row">Species</th>
+<td class="td2">'.$species.'</td>
+</tr>
+
+<tr class="dk">
+<th class="td1" scope="row">Gene ID</th>
+<td class="td2">'.$gene_id.'</td>
+</tr>
+<tr>
+<th class="td1" scope="row">Gene Symbol</th>
+<td class="td2">'.$gene_sym.'</td>
+</tr>
+<tr class="dk">
+<th class="td1" scope="row">Gene Symbol Just.</th>
+<td class="td2">'.$sym_just.'</td>
+</tr>
+<tr>
+<th class="td1" scope="row">Gene Status</th>
+<td class="td2">'.$status.'</td>
+</tr>
+<tr class="dk">
+<th class="td1" scope="row">Gene Status Just.</th>
+<td class="td2">'.$status_just.'</td>
+</tr>
+<tr>
+<th class="td1" scope="row">Gene Descriptions</th>
+<td class="td2">'.$description.'</td>
+</tr>
+<tr class="dk">
+<th class="td1" scope="row">Gene Description Just.</th>
+<td class="td2">'.$desc_just.'</td>
+</tr>
+<tr>
+<th class="td1" scope="row">PMID</th>
+<td class="td2">'.$pmid.'</td>
+</tr>
+<tr>
+
+
+<th class="td1" scope="row">Comments.</th>
+<td class="td2">'.$comments.'</td>
+</tr>
+</table>      
+</div>
+
+</td></tr>
+</tbody>
+</table>',
+//'#prefix' => '<div class="ui-widget" style="width: 515px; height: 200px;">',
+// '#suffix' => '</div>',
+        '#attributes' => array('id' => 'species-filler'),
         );
     }
-
-
-
-
-
 
     return $form;
 
