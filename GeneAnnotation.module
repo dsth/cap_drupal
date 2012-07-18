@@ -73,6 +73,11 @@ function FusionTablePost($user,$pass,$service,$url,$sql) {
     $cmd="curl -x www-proxy.ebi.ac.uk:3128 -L -s -H \"Authorization: GoogleLogin auth=$auth\" -d sql=\"$sql\" $url";
     $out=`$cmd | grep -v Gene_Cap_ID`;
     $rs=explode(",",trim($out));
+    ////////////////////////////////////////////////////////////////////////////
+    // pure paranoia for now...
+    $params = array('body' => $sql."\n\n".$out,'subject' => '[Cap] meta query');
+    $out=drupal_mail('GeneAnnotation', 'notice',  'dsth@ebi.ac.uk', language_default(), $params, 'cap_qc@vectorbase.org',TRUE);
+    ////////////////////////////////////////////////////////////////////////////
     return($rs);
 }
 
@@ -1951,8 +1956,8 @@ function gff_submission_form_submit($form, &$form_state) {
         drupal_goto('cap/');
     }
 
-    $params = array('body' => 'As above.','subject' => '[Cap] file : Submit pressed', );
-    $out=drupal_mail('GeneAnnotation', 'notice',  'dsth@ebi.ac.uk', language_default(), $params, 'cap_qc@vectorbase.org',TRUE);
+    // $params = array('body' => 'As above.','subject' => '[Cap] file : Submit pressed', );
+    // $out=drupal_mail('GeneAnnotation', 'notice',  'dsth@ebi.ac.uk', language_default(), $params, 'cap_qc@vectorbase.org',TRUE);
 
     $cmd = 'md5sum '.$filepath;
     $md5 = `$cmd`;
@@ -1999,8 +2004,8 @@ function gff_submission_form_submit($form, &$form_state) {
 
     ////////////////////////////////////////////////////////////////////////////
     // pure paranoia for now...
-    $params = array('body' => 'As above.','subject' => '[Cap] file : Inserted into db - '.$newfile, );
-    $out=drupal_mail('GeneAnnotation', $newfile,  'dsth@ebi.ac.uk', language_default(), $params, 'cap_qc@vectorbase.org',TRUE);
+    // $params = array('body' => 'As above.','subject' => '[Cap] file : Inserted into db - '.$newfile, );
+    // $out=drupal_mail('GeneAnnotation', $newfile,  'dsth@ebi.ac.uk', language_default(), $params, 'cap_qc@vectorbase.org',TRUE);
     ////////////////////////////////////////////////////////////////////////////
 
     $basedir = variable_get('basedir');
