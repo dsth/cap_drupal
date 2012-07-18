@@ -1,10 +1,9 @@
 <?php
 
-/////////// need to put the validation checks in - i.e. can't put certain fields in without justification?!?
-
-/////////// need to have the note about not recognising the name...
-
-/////////// with pre-edited check permissions and print table of current status...
+////// make all curl calls via curl bindings and not using system calls?!?
+////// proxy stuff
+////// factor changes for nd into settings to avoid having module diverge?!?
+////// put redirect on capadmin to something stating you must pass a query string?!?
 
 // $GLOBALS["bored"] = 0;
 $gene_info_switch=0;
@@ -57,8 +56,16 @@ function ClientLogin($service,$user,$pass) {
     // return "curl -s -d Email=$user -d Passwd=$pass -d service=$service https://www.google.com/accounts/ClientLogin | tr ' ' \\n | grep Auth= | sed -e 's/Auth=//'";
 }
 
+function FusionTableUrlEncode($user,$pass,$service,$url,$sql) {
+    $auth=ClientLogin($service,$user,$pass);
+    $cmd="curl -x www-proxy.ebi.ac.uk:3128 -L -s -H \"Authorization: GoogleLogin auth=$auth\" --data-urlencode sql=\"$sql\" $url";
+    $out=`$cmd | grep -v Gene_Cap_ID`;
+    $rs=explode(",",trim($out));
+    return($rs);
+}
+
 ///// may be case that php may be linked against a more up-to-date libcurl?!?
-function FusionTableQuery($user,$pass,$service,$url,$sql) {
+function FusionTablePost($user,$pass,$service,$url,$sql) {
     $auth=ClientLogin($service,$user,$pass);
     ///// seems we have a v. old version of curl on treason?!? so instead of using --data-urlencode we'll just use POST?!? - while the documentation says to use GET/POST in difference situations
     ///// seems both are fine?!?
@@ -68,7 +75,6 @@ function FusionTableQuery($user,$pass,$service,$url,$sql) {
     $rs=explode(",",trim($out));
     return($rs);
 }
-
 
 // set up the global vars
 function GeneAnnotation_init() {
@@ -93,6 +99,24 @@ function GeneAnnotation_init() {
 
     variable_set('feat_regex','CDS|exon|gene|mRNA|tRNA|pseudogenic_tRNA|rRNA|miRNA|ncRNA|pseudogene');
 
+    $cap_meta_table = str_replace('_',' ',$inifile['CAP_META_TABLE_LIST']);
+    $cap_meta_table_array = explode(',', $cap_meta_table);
+    $cap_meta_table_assoc=array();
+    foreach ($cap_meta_table_array as $item) {
+        list($key,$value)=explode(":",$item);
+        $cap_meta_table_assoc[$key]=$value;
+    }
+
+    foreach ($species_metau_array as $item) {
+        if (!array_key_exists($item,$cap_meta_table_assoc)) {
+            echo "There must be a table defined for $item in ini file";
+            exit;
+        }
+    }
+
+    variable_set('cap_meta_table_list',$cap_meta_table_assoc);
+
+    variable_set('cap_meta_table',  $inifile['CAP_META_TABLE']);
     //variable_set('basedir', '/home/dsth/');
     variable_set('filelimit', $inifile['GFFFILELIMIT']);
     variable_set('curl', $inifile['CURL_BASH_WRAP']);
@@ -300,7 +324,7 @@ function cap_frontpage() {
     ); 
 
     drupal_add_css(
-        drupal_get_path('module', 'GeneAnnotation') . '/css/tablescroll.css', 
+        drupal_get_path('module', 'GeneAnnotation') . '/css/tablescroll_cap_meta.css', 
     array('group' => CSS_DEFAULT, 'every_page' => TRUE)
     );
 
@@ -523,7 +547,7 @@ function gene_info_submission_form_validate($form, &$form_state) {
             && !$form_state['values']['comment']
         ) { form_set_error('', t('Please fill something in.')); } 
 
-    if ($form_state['values']['pmid'] && !ctype_digit($form_state['values']['pmid'])) { form_set_error('', t('PMID must be numeric.')); } 
+    // if ($form_state['values']['pmid'] && !ctype_digit($form_state['values']['pmid'])) { form_set_error('', t('PMID must be numeric.')); } 
 
     if ($form_state['values']['genestat'] && !$form_state['values']['status_just']) { form_set_error('', t('Please give a justification for a gene status change.')); } 
 
@@ -539,41 +563,68 @@ function gene_info_submission_form_submit($form, &$form_state) {
         return drupal_access_denied(); 
     }
 
-//    if ($format != 'gff3') {
-      //;
-      //} 
+    // date('l jS \of F Y h:i:s A')
     
-/*
-+----------------+------------------+------+-----+---------+----------------+
-| Field          | Type             | Null | Key | Default | Extra          |
-+----------------+------------------+------+-----+---------+----------------+
-| sbm_id - auto  | int(10) unsigned | NO   | PRI | NULL    | auto_increment |
-| nid            | int(10) unsigned | NO   | MUL | 0       |                |
-/| submitter_name | varchar(128)     | NO   |     | NULL    |                |
-| user           | varchar(32)      | NO   |     | NULL    |                |
-| user_email     | varchar(32)      | NO   |     | NULL    |                |
-| uid            | int(10) unsigned | NO   |     | 0       |                |
-| ip             | varchar(32)      | NO   |     | NULL    |                |
-| edited         | int(10) unsigned | NO   |     | 0       |                |
-| species        | varchar(32)      | NO   |     | NULL    |                |
-| gene_id        | varchar(32)      | NO   |     | NULL    |                |
-| status         | varchar(10)      | NO   |     | NULL    |                |
-| status_just    | varchar(1256)    | NO   |     |         |                |
-| gene_sym       | varchar(32)      | NO   |     | NULL    |                |
-| sym_just       | varchar(1256)    | NO   |     |         |                |
-| desc           | varchar(256)     | NO   |     | NULL    |                |
-| desc_just      | varchar(1256)    | NO   |     |         |                |
-| pmid           | int(10) unsigned | NO   |     | 0       |                |
-| comments       | varchar(1256)    | NO   |     |         |                |
-+----------------+------------------+------+-----+---------+----------------+
-*/
+    $gene_id = $form_state['values']['howmany_select'];
+    $c_user=variable_get('cap_meta_user');
+    $c_pass=variable_get('cap_meta_pass');
+    $c_url=variable_get('cap_meta_url');
+    
+    $c_table_assoc=variable_get('cap_meta_table_list');
+    $c_table=$c_table_assoc[$form_state['values']['species']]; // variable_get('cap_meta_table');
+    // $c_table=variable_get('cap_meta_table');
+    
+    $c_service=variable_get('cap_meta_service');
 
-/*    drupal_set_message(
-        $form_state['values']['desc'],
-        'warning');
-    drupal_goto('cap/'); */
-    ///// almost certainly need conditional inclusions here - i.e. 
-    //if($GLOBALS["bored"]) {
+    $genstat    =   str_replace("'",'_',$form_state['values']['genestat']?$form_state['values']['genestat']:'');
+    $genstatj   =   str_replace("'",'_',$form_state['values']['status_just']?$form_state['values']['status_just']:'');
+    $gensym     =   str_replace("'",'_',$form_state['values']['gene_sym']?$form_state['values']['gene_sym']:'');
+    $gensymj    =   str_replace("'",'_',$form_state['values']['gene_sym_just']?$form_state['values']['gene_sym_just']:'');
+    $gendesc    =   str_replace("'",'_',$form_state['values']['description']?$form_state['values']['description']:'');
+    $gendescj  =   str_replace("'",'_',$form_state['values']['desc_just']?$form_state['values']['desc_just']:'');
+    $genpmid    =   str_replace("'",'_',$form_state['values']['pmid']?$form_state['values']['pmid']:'');
+    $gencomm    =   str_replace("'",'_',$form_state['values']['comment']?$form_state['values']['comment']:'');
+    
+    // $p=str_replace(' ','',$pmid);
+    
+    // $string = preg_replace("/_{2,}/","_",$string);
+    // $auth = ClientLogin($c_service,$c_user,$c_pass);
+    // $auth=`$auth`;
+    // "SELECT Submitter,Gene_Cap_ID,Gene_Canon_ID,Species,Meta_Data_Status,Gene_Status,Gene_Symbol,Gene_Synonyms,Gene_Description,Gene_Family,PMIDs,Submission_Date FROM $c_table where Gene_Cap_ID = '$gene_id'"
+
+    $sql = "INSERT INTO $c_table (Gene_Cap_ID,Species,"
+      ."Meta_Data_Status,Gene_Status,Gene_Status_Just,Gene_Symbol,Gene_Symbol_Just,Gene_Description,Gene_Description_Just,PMIDs,Submitter_Comments,Submitter,Submission_Date) VALUES ('"
+            .$form_state['values']['howmany_select']."','"
+            .$form_state['values']['species']."','UNINCORPORATED','"
+            .$genstat."','"
+            .$genstatj."','"
+            .$gensym."','"
+            .$gensymj."','"
+            .$gendesc."','"
+            .$gendescj."','"
+            .$genpmid."','"
+            .$gencomm."','"
+            .$GLOBALS['user']->name."','"
+            .date('l jS \of F Y h:i:s A')."')";
+
+    $response = FusionTablePost (
+        $c_user,
+        $c_pass,$c_service,
+        $c_url,$sql
+    );
+
+    if (preg_match("/^rowid\s+(\d+)$/",$response[0],$match)) { // rowid 15302
+        // $r=implode("___",$response);
+        $message = '<p>Gene meta-data submission for gene ID='.$form_state['values']['howmany_select']
+            .' (sbm='.$match[0].') successful.</p>';
+        drupal_set_message($message);
+    } else {
+        drupal_set_message("There seems to be a problem communicating with the remote server. "
+          ."Please try again later. If the problem continues please email cap_qc@vectorbase.org.",'warning');
+    }
+
+
+    /*
 
     $sbmid = db_insert('cap_gene_node')->fields(
         array(
@@ -600,6 +651,7 @@ function gene_info_submission_form_submit($form, &$form_state) {
     $message = '<p>Gene meta-data submission for gene ID='.$form_state['values']['howmany_select']
       .' successful. Please quote submission id='.$sbmid.' in any enquiries you send.</p>';
     drupal_set_message($message);
+     */
 
    // $GLOBALS["bored"] = 0;
    // }
@@ -670,9 +722,15 @@ function gene_info_submission_form($form, &$form_state) { // the error was all t
     $default = !empty($form_state['values']['howmany']) ? $form_state['values']['howmany'] : 1;
 
     $species = variable_get('species_metau');
-    // $species = variable_get('species');
 
-    ///////////////////////////////////////////////////// put in the gene id textbox
+    ////// we need to know which table to look in?!?
+    $form['species'] = array(
+        '#type' => 'select',
+        '#title' => t('Species'),
+        '#options' => drupal_map_assoc($species),
+        // '#states' => array( 'visible' => array( ':input[name="sbm"]' => array('value' => 'gff'), ), ), 
+    );
+
     $form['howmany_select'] = array(
         '#title' => t('Gene ID'),
         '#type' => 'textfield',
@@ -680,7 +738,7 @@ function gene_info_submission_form($form, &$form_state) { // the error was all t
         '#maxlength' => 50,
         '#description' => t('Enter a gene stable ID as it appears in gff and press enter.'),
         '#ajax' => array(
-        'callback' => 'ajax_callback',
+        'callback' => 'ajax_callback_for_meta_table', // deprecated
         'wrapper' => 'checkboxes-div',
         'method' => 'replace',
         'effect' => 'slide',
@@ -693,7 +751,6 @@ function gene_info_submission_form($form, &$form_state) { // the error was all t
         'prevent' => 'click',
         ),
          '#attributes' => array('class' => array('inputything')),
-
     );
 
     // check if the user is logged in
@@ -724,32 +781,36 @@ function gene_info_submission_form($form, &$form_state) { // the error was all t
         $c_user=variable_get('cap_meta_user');
         $c_pass=variable_get('cap_meta_pass');
         $c_url=variable_get('cap_meta_url');
-        $c_table=variable_get('cap_meta_table');
+        
+        $c_table_assoc=variable_get('cap_meta_table_list');
+        $c_table=$c_table_assoc[$form_state['values']['species']]; // variable_get('cap_meta_table');
+        // $c_table=variable_get('cap_meta_table');
+        
         $c_service=variable_get('cap_meta_service');
 
 //        $auth = ClientLogin($c_service,$c_user,$c_pass);
         // $auth=`$auth`;
 
-        $response = FusionTableQuery (
+        $response = FusionTablePost (
             $c_user,
             $c_pass,$c_service,
-            $c_url,"SELECT Submitter,Gene_Cap_ID,Gene_Canon_ID,Species_Version,Meta_Data_Status,Gene_Status,Gene_Status_Just,Gene_Symbol,Gene_Symbol_Just,Gene_Synonyms,Gene_Synonyms_Just,Gene_Description,Gene_Description_Just,Gene_Family,PMIDs,Submitter_Comments FROM $c_table where Gene_Cap_ID = '$gene_id'"
+            $c_url,"SELECT Submitter,Gene_Cap_ID,Gene_Canon_ID,Species,Meta_Data_Status,Gene_Status,Gene_Symbol,Gene_Synonyms,Gene_Description,Gene_Family,PMIDs,Submission_Date FROM $c_table where Gene_Cap_ID = '$gene_id'"
         );
-                                                                                                                                                                                                                                                    
-        $p=var_dump($response);
+
+/*        
         $form['gene_info']['unknown'] = array(
             '#type' => 'markup',
-            '#markup' => '<div class="ino_msgbox"><pre>what the fuck-'."\nout=".$p."\n".'-seriously</pre><div>',
+            '#markup' => '<div class="ino_msgbox"><pre>what the fuck-'."\nout=".count($response)."\n".'-seriously</pre><div>',
             // '#markup' => '<div class="ino_msgbox"><pre>what the fuck-'."\n".$c_service."\n".$c_user."\n".$c_pass."\n".$c_url."\n".$auth."\n".$response."\nout=".$t."\n".'-seriously</pre><div>',
             '#attributes' => array('id' => 'species-filler'),
         );
         return $form;
-
+*/
         
         if(count($response)==1) {
             // exit;
             $gene_info_switch = 1;
-        } elseif (count($response)==16) {
+        } elseif (count($response)==13) {
         //// already edited
             // exit;
             $ret=-1;
@@ -757,7 +818,7 @@ function gene_info_submission_form($form, &$form_state) { // the error was all t
         } else {      
             $form['gene_info']['unknown'] = array(
                 '#type' => 'markup',
-                '#markup' => '<div class="info_msgbox">There is a problem with remote serrver please try later - if probem continues email...</div>',
+                '#markup' => '<div class="info_msgbox">There is a problem with remote serrver please try later. Please email cap_qc@vectorbase.org if the problem continues ('.count($response).')</div>',
                 '#attributes' => array('id' => 'species-filler'),
             );
             return $form;
@@ -812,12 +873,14 @@ function gene_info_submission_form($form, &$form_state) { // the error was all t
             );
         }
 
+        /*
         $form['gene_info']['species'] = array(
             '#type' => 'select',
             '#title' => t('Species'),
             '#options' => drupal_map_assoc($species),
-            /* '#states' => array( 'visible' => array( ':input[name="sbm"]' => array('value' => 'gff'), ), ), */
+            // '#states' => array( 'visible' => array( ':input[name="sbm"]' => array('value' => 'gff'), ), ), 
         );
+         */
 
         $form['gene_info']['genestat'] = array(
            // '#type' => 'checkboxes',
@@ -939,6 +1002,7 @@ function gene_info_submission_form($form, &$form_state) { // the error was all t
 
         $form['gene_info']['pmid'] = array(
             '#type' => 'textfield',
+            // '#type' => 'textfield',
             '#title' => t('[D] PMID'),
             '#size' => 50,
             // '#size' => 20,
@@ -946,7 +1010,7 @@ function gene_info_submission_form($form, &$form_state) { // the error was all t
             '#prefix' => '<div class="ui-widget">',
             '#suffix' => '</div>',
             '#ajax' => array(
-                'callback' => 'submit_driven_callback',
+                'callback' => 'grab_pmid_titles_submit_driven_callback',
                 'wrapper' => 'checkboxes-div',
                 'method' => 'replace',
                 'effect' => 'slide',
@@ -957,7 +1021,7 @@ function gene_info_submission_form($form, &$form_state) { // the error was all t
                 'keypress' => TRUE,
                 'prevent' => 'click',
             ),
-            '#description' => 'Enter a Pubmed ID and press enter.',
+            '#description' => 'Enter a Pubmed ID and press enter (if adding multiple separate with commas).',
          '#attributes' => array('class' => array('inputything')),
         );
 
@@ -965,7 +1029,7 @@ function gene_info_submission_form($form, &$form_state) { // the error was all t
             '#type' => 'markup',
             '#prefix' => '<div id="box">',
             '#suffix' => '</div>',
-            '#markup' => '<div class="msgbox3"><h5>Pubmed Entry</h5><p>Title:</p></div>',
+            '#markup' => '<div class="msgbox3"><h5>Pubmed Entry</h5><p>Enter a list of comma-separated  PMIDs and press enter in box [D] above to check titles</p></div>',
         );
 
         /* multiple submission type buttons cause multiple submissions upon full form submission - sure there's a way around this, but atm will have 'enter' triggered event above'
@@ -999,6 +1063,7 @@ function gene_info_submission_form($form, &$form_state) { // the error was all t
     // let's print a table of the current values for the gene?!?
     } elseif ($ret==-1) {
 
+        /*
         $user;
         $species;
         $gene_sym;
@@ -1024,11 +1089,16 @@ function gene_info_submission_form($form, &$form_state) { // the error was all t
             $pmid = $row->pmid; 
             $comments = $row->comments; 
         }
+         */
 
         $emptystr = '---';
             //'#markup' => '<div class="msgbox"><h3>Gene Already Edited.</h3><p>To edit the entry for this gene please contact your group representative or contact VectorBase (info-at-vectorabse.org).</p></div>
             // '# markup' => '<div class="warning_msgbox">This Gene has already been edited. To edit the entry for this gene please contact your group representative or contact VectorBase (info-at-vectorabse.org).</div>
             // <table id="customers" border="1">
+        //
+
+        $date = empty($response[11]) ? "---" : $response[11];
+
         $form['gene_info']['table'] = array(
             '#type' => 'markup',
             '#markup' => '<div class="warning_msgbox">This Gene has already been edited. To edit the entry for this gene please contact your group representative or contact VectorBase (info-at-vectorabse.org).</div>
@@ -1047,7 +1117,7 @@ function gene_info_submission_form($form, &$form_state) { // the error was all t
 <!-- FOOTER -->
 <tfoot>
 <tr>
-<td colspan="2">DATE OF EDIT : 30 June 2012</td>
+<td colspan="2">Submitter : '.$response[0].', Date : '.$date.', Status : '.$response[4].'</td>
 </tr>
 </tfoot>
 
@@ -1058,48 +1128,56 @@ function gene_info_submission_form($form, &$form_state) { // the error was all t
 
 <table class="tabletwo">
 
+<!--// $c_url,"SELECT 
+  0  Submitter,
+  1  Gene_Cap_ID,
+  2  Gene_Canon_ID,
+  3  Species_Version,
+  4  Meta_Data_Status,
+  5  Gene_Status,
+  6  Gene_Symbol,
+  7  Gene_Synonyms,
+  8  Gene_Description,
+  9  Gene_Family,
+  10  PMIDs,
+-->
+
 <tr>
-<th class="td1" scope="row">Species</th>
-<td class="td2">'.$species.'</td>
+<th class="td1" scope="row">Gene Cap ID</th>
+<td class="td2">'.$response[1].'</td>
 </tr>
 
 <tr class="dk">
-<th class="td1" scope="row">Gene ID</th>
-<td class="td2">'.$gene_id.'</td>
+<th class="td1" scope="row">Gene Canonical ID</th>
+<td class="td2">'.$response[2].'</td>
+</tr>
+<tr>
+<th class="td1" scope="row">Cap Species</th>
+<td class="td2">'.$response[3].'</td>
+</tr>
+<tr class="dk">
+<th class="td1" scope="row">Gene Status</th>
+<td class="td2">'.$response[5].'</td>
 </tr>
 <tr>
 <th class="td1" scope="row">Gene Symbol</th>
-<td class="td2">'.$gene_sym.'</td>
+<td class="td2">'.$response[6].'</td>
 </tr>
 <tr class="dk">
-<th class="td1" scope="row">Gene Symbol Just.</th>
-<td class="td2">'.$sym_just.'</td>
-</tr>
-<tr>
-<th class="td1" scope="row">Gene Status</th>
-<td class="td2">'.$status.'</td>
-</tr>
-<tr class="dk">
-<th class="td1" scope="row">Gene Status Just.</th>
-<td class="td2">'.$status_just.'</td>
+<th class="td1" scope="row">Gene Synonyms</th>
+<td class="td2">'.$response[7].'</td>
 </tr>
 <tr>
 <th class="td1" scope="row">Gene Descriptions</th>
-<td class="td2">'.$description.'</td>
+<td class="td2">'.$response[8].'</td>
 </tr>
 <tr class="dk">
-<th class="td1" scope="row">Gene Description Just.</th>
-<td class="td2">'.$desc_just.'</td>
+<th class="td1" scope="row">Gene Family</th>
+<td class="td2">'.$response[9].'</td>
 </tr>
 <tr>
-<th class="td1" scope="row">PMID</th>
-<td class="td2">'.$pmid.'</td>
-</tr>
-<tr>
-
-
-<th class="td1" scope="row">Comments.</th>
-<td class="td2">'.$comments.'</td>
+<th class="td1" scope="row">PMIDs</th>
+<td class="td2">'.$response[10].'</td>
 </tr>
 </table>      
 </div>
@@ -1336,11 +1414,10 @@ function download_page($path){
         ); */
 //        return $form;
 
-function submit_driven_callback($form, $form_state) {
+function grab_pmid_titles_submit_driven_callback($form, $form_state) {
   // In most cases, it is recomended that you put this logic in form generation
   // rather than the callback. Submit driven forms are an exception, because
   // you may not want to return the form at all.
-    //
 
     $pmid = $form_state['values']['pmid'];
 
@@ -1349,10 +1426,41 @@ function submit_driven_callback($form, $form_state) {
         return array('#type' => 'ajax', '#commands' => $commands);
     }
 
-    $XML = download_page("http://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=$pmid");
+    $p=str_replace(' ','',$pmid);
+    $a=array_filter(explode(',',$p));
+                     
+    $markup=array();
 
-    // $curl = variable_get('curl');
-    $title = '';
+    foreach ($a as $id) {
+         
+        $XML = download_page("http://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=$id");
+        // $curl = variable_get('curl');
+        $title = '';
+
+        if(preg_match("/title\s+?\{.*?name\s+\"(.*?)\"/ms", $XML, $titlematches)) {
+            $title = $titlematches[1];
+        //if(preg_match("/title\s+?\{.*?name\s+?&quot;(.*?)&quot;/ms", $XML, $titlematches)) {
+            // array_push is same as array[]=...?!?
+
+            if(preg_match("/(Error occurred|does not exist)/",$title)) {
+
+                $markup[]=$id.' : Atricle does not appear to exist';
+            } else {
+                $markup[]=$id.' : '.$title;
+            }
+
+        } else { 
+            $markup[]=$id.' : Problem retrieving entry';
+        }
+
+    }                
+
+    $commands = array();
+    $body = implode ("</p><p>",$markup);
+    $commands[] = ajax_command_replace("#box", '<div id="box"><div class="msgbox3"><h5>Pubmed Entry</h5><p>'.$body.'</p></div></div>');  
+
+    return array('#type' => 'ajax', '#commands' => $commands);
+    
     
 ///////////////////////////////////////////////
 /////// when they change it we need to debug?!?
@@ -1360,29 +1468,22 @@ function submit_driven_callback($form, $form_state) {
 /* $commands[] = ajax_command_replace("#box", '<div id="box"><div class="msgbox3"><h5>Pubmed Entry</h5><p>Title: '.$XML.'</p></div></div>');  
 return array('#type' => 'ajax', '#commands' => $commands); */
 ///////////////////////////////////////////////
+    $commands[] = ajax_command_replace("#box", '<div id="box"><div class="msgbox3"><h5>Pubmed Entry</h5><p>Error: Problem retrieving entry.</p></div></div>');  
+    return array('#type' => 'ajax', '#commands' => $commands);
 
-    if(preg_match("/title\s+?\{.*?name\s+\"(.*?)\"/ms", $XML, $titlematches)) {
-    //if(preg_match("/title\s+?\{.*?name\s+?&quot;(.*?)&quot;/ms", $XML, $titlematches)) {
-        $title = $titlematches[1];
-    } else { 
-            $commands[] = ajax_command_replace("#box", '<div id="box"><div class="msgbox3"><h5>Pubmed Entry</h5><p>Error: Problem retrieving entry.</p></div></div>');  
-            return array('#type' => 'ajax', '#commands' => $commands);
-    }
-
+    $commands[] = ajax_command_replace("#box", '<div id="box"><div class="msgbox3"><h5>Pubmed Entry</h5><p>Error: Article does not exist.</p></div></div>');  
+    return array('#type' => 'ajax', '#commands' => $commands);
     //`curl -s http://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi\?db=pubmed\&id=$pmid`;// | perl -0pe 's/.*?title\s\{.*?name &quot;(.*?)&quot;.*/$1/sm' | perl -pe 's/\n//g'`;
     // $title = `curl -s http://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi\?db=pubmed\&id=$pmid`;// | perl -0pe 's/.*?title\s\{.*?name &quot;(.*?)&quot;.*/$1/sm' | perl -pe 's/\n//g'`;
     // $title = `curl -s http://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi\?db=pubmed\&id=$pmid | perl -0pe 's/.*?title\s\{.*?name &quot;(.*?)&quot;.*/$1/sm' | perl -pe 's/\n//g'`;
-    $commands = array();
     // Replace the content of '#object-1' on the page with 'some html here'.
 
-    if(preg_match("/(Error occurred|does not exist)/",$title)) {
-        $commands[] = ajax_command_replace("#box", '<div id="box"><div class="msgbox3"><h5>Pubmed Entry</h5><p>Error: Article does not exist.</p></div></div>');  
-        return array('#type' => 'ajax', '#commands' => $commands);
+////// seems this is a horrible way to do it...
+  $element = $form['box'];
+  $element['#markup'] = "";
+  return $element['#markup'] = "Title : '$title'";
 
-    }
-
-    $commands[] = ajax_command_replace("#box", '<div id="box"><div class="msgbox3"><h5>Pubmed Entry</h5><p>Title: '.$title.'</p></div></div>');  
-    return array('#type' => 'ajax', '#commands' => $commands);
+}
 
 ////////////////////////////////////
 ////////////////////////////////////
@@ -1426,14 +1527,6 @@ ajax_command_settings	Creates a Drupal Ajax 'settings' command.
 
 
 
-
-
-////// seems this is a horrible way to do it...
-  $element = $form['box'];
-  $element['#markup'] = "";
-  return $element['#markup'] = "Title : '$title'";
-
-}
 
 
 function check_name($form,$form_status) {
@@ -1510,7 +1603,8 @@ function check_gene_entry($gene_id) {
     } 
 }
 
-function ajax_callback($form, $form_state) {
+// deprecated?!?
+function ajax_callback_for_meta_table($form, $form_state) {
     
     $return = check_gene_entry($form_state['values']['howmany_select']);
     
