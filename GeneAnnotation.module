@@ -84,9 +84,10 @@ function FusionTablePost($user,$pass,$service,$url,$sql) {
 // set up the global vars
 function GeneAnnotation_init() {
 
-    $inifilepath = '/homes/dsth/dev/NewCap/basedir/GeneAnnotation.ini';
+    $inifilepath = drupal_get_path('module', 'GeneAnnotation') . '/GeneAnnotation.ini';
 
     define("BINARY", "Save was binary");
+
     $inifile = parse_ini_file($inifilepath);
     // var_dump($inifile);
 
@@ -137,6 +138,10 @@ function GeneAnnotation_init() {
     variable_set('cap_meta_user',  $inifile['CAP_META_USER']);
     variable_set('cap_meta_pass',  $inifile['CAP_META_PASS']);
     variable_set('cap_meta_service',  $inifile['CAP_META_SERVICE']);
+
+    variable_set('cap_admin_uid', $inifile['CAP_ADMIN_UID']);
+    variable_set('cap_base_uri', $inifile['CAP_BASE_URI']);
+
 }
 
 // By implementing hook_help(), a module can make documentation available to the user for the module as a whole, or for specific paths.
@@ -181,43 +186,41 @@ function GeneAnnotation_menu() {
         'title'            => 'Download file',
         'page callback'	   => 'download_gff_file',
         'page arguments'   => array(1),
-        //'access arguments' => array('access direct download file')
         'access arguments' => array('access content')
     );
         
     $items['meta'] = array(
         'page callback' => 'meta_data_list',
-        'access arguments' => array('administer access control')
+        'access arguments' => array('access content')
     );
 
     $items['uploaded'] = array(
         'page callback' => 'uploaded_files_list',
-//        'access callback' => TRUE,
-        'access arguments' => array('administer access control')
+        'access arguments' => array('access content')
     );
 
     $items['capadmin/%'] = array(
         'page callback'	   => 'grab_json',
         'page arguments'   => array(1),
-        'access arguments' => array('administer access control')
+        'access arguments' => array('access content')
     );
 
     $items['uploaded/%'] = array(
         'page callback'	   => 'grab_a_submission_with_rest',
         'page arguments'   => array(1),
-        'access arguments' => array('administer access control')
+        'access arguments' => array('access content')
     );
 
     $items['metadelete/%'] = array(
         'page callback'	   => 'delete_meta_entry',
         'page arguments'   => array(1),
-        'access arguments' => array('administer access control')
+        'access arguments' => array('access content')
     );
 
     $items['update/%'] = array(
         'page callback'	   => 'generic_update',
         'page arguments'   => array(1),
-        'access arguments' => array('administer access control')
+        'access arguments' => array('access content')
     );
 
     /*
@@ -231,7 +234,7 @@ function GeneAnnotation_menu() {
     $items['uploadedignore/%'] = array(
         'page callback'	   => 'ignore_uploaded_entry',
         'page arguments'   => array(1),
-        'access arguments' => array('administer access control')
+        'access arguments' => array('access content')
     );
 
     $items['submission'] = array(
@@ -339,30 +342,39 @@ function cap_frontpage() {
 }
 
 function delete_meta_entry($gene_id = NULL ,$format = NULL) {
+
+    if($GLOBALS['user']->uid != variable_get('cap_admin_uid')) { 
+        return drupal_access_denied();  
+    }
+
     $num_deleted = db_delete('cap_gene_node')->condition('gene_id', $gene_id, '=')->execute();
     drupal_set_message('Wiping entries for gene ID='.$gene_id.'. Deleted entries : '.$num_deleted);
-    drupal_goto('cap/');
+    drupal_goto(variable_get('cap_base_uri'));
 }
 
 function generic_update($a) {
 
+    if($GLOBALS['user']->uid != variable_get('cap_admin_uid')) { 
+        return drupal_access_denied();  
+    }
+
     if(!preg_match("/^pass=(\S+?):table=(\S+?):([\s\w]+?)=([\s\w]+?):([\s\w]+?)=([\s\w]+)$/", $a, $matches)) {
         drupal_set_message('give me string pass=pass:table=table:oldcol=old val:condcol=condval','warning');
-        drupal_goto('cap/');
+        drupal_goto(variable_get('cap_base_uri'));
     }
         
     $sha1pword = variable_get('update_sha1_pass');
     // $ar = explode(':', $a);
     if (sha1($matches[1])!=$sha1pword) {
         drupal_set_message('wrong password','error');
-        drupal_goto('cap/');
+        drupal_goto(variable_get('cap_base_uri'));
     }
 
     $table;
 
     if ($matches[2]!='gene'&&$matches[2]!='file') {
         drupal_set_message('must give table to modify (gene/file)','error');
-        drupal_goto('cap/');
+        drupal_goto(variable_get('cap_base_uri'));
     }
 
     $table = 'cap_'.$matches[2].'_node';
@@ -370,7 +382,7 @@ function generic_update($a) {
     $num_updated = db_update($table)->fields(array($matches[3] => $matches[4] ))->condition($matches[5], $matches[6], '=')->execute();
 
     drupal_set_message($table.' update set '.$matches[3].'='.$matches[4].'  where '.$matches[5].'='.$matches[6].'. updated entries : '.$num_updated, 'warning');
-    drupal_goto('cap/');
+    drupal_goto(variable_get('cap_base_uri'));
 
 }
 
@@ -379,26 +391,35 @@ function generic_update($a) {
 function delete_uploaded_entry($sbm_id = NULL ,$format = NULL) {
     $num_deleted = db_delete('cap_file_node')->condition('sbm_id', $sbm_id, '=')->execute();
     drupal_set_message('Wiping entry for file submission sbm_id='.$sbm_id.'. Deleted entries : '.$num_deleted);
-    drupal_goto('cap/');
+    drupal_goto(variable_get('cap_base_uri'));
 }
 */
 
 function ignore_uploaded_entry($a = NULL ,$format = NULL) {
+
+    if($GLOBALS['user']->uid != variable_get('cap_admin_uid')) { 
+        return drupal_access_denied();  
+    }
+
     if(!preg_match("/^pass=(\S+?):sbm_id=(\S+?)$/", $a, $matches)) {
         drupal_set_message('give me string pass=pass:sbm_id=value','warning');
-        drupal_goto('cap/');
+        drupal_goto(variable_get('cap_base_uri'));
     }
     if (sha1($matches[1])!='f2b3575186e3db43c7f19d356b6d40afbe25ce57') {
         drupal_set_message('wrong password','error');
-        drupal_goto('cap/');
+        drupal_goto(variable_get('cap_base_uri'));
     }
     $num_updated = db_update('cap_file_node')->fields(array('file_name' => 'IGNORE' ))->condition('sbm_id', $matches[2], '=')->execute();
     drupal_set_message('Ignoreing entry for file submission sbm_id='.$matches[2].'. updated entries : '.$num_updated,'warning');
-    drupal_goto('cap/');
+    drupal_goto(variable_get('cap_base_uri'));
 }
 
 // just take the file name and print it to screen in a formatted manner - i.e. need to keep '\n' etc. - perhaps have also allow for further arg processing e.g. genesonly...
 function grab_a_submission_with_rest($file = NULL ,$format = NULL) {
+
+    if($GLOBALS['user']->uid != variable_get('cap_admin_uid')) { 
+        return drupal_access_denied();  
+    }
 
     // die('file: '.$file.' format: '.$format);
 
@@ -424,6 +445,10 @@ function grab_a_submission_with_rest($file = NULL ,$format = NULL) {
 
 // sends download
 function download_gff_file($filename) {
+
+    if($GLOBALS['user']->uid != variable_get('cap_admin_uid')) { 
+        return drupal_access_denied();  
+    }
 
     $filepath = variable_get('basedir').'/tmp/'.$filename;
     
@@ -671,7 +696,7 @@ function gene_info_submission_form_submit($form, &$form_state) {
             $form_state['values']['comment']
             .' - ',
         'warning');
-        drupal_goto('cap/');
+        drupal_goto(variable_get('cap_base_uri'));
 
     $result = db_query(
         'insert into {cap_gene_node} '
@@ -683,7 +708,7 @@ function gene_info_submission_form_submit($form, &$form_state) {
     ) or die;// or die(mysql_error());  
 
         drupal_set_message('We have already received.','warning');
-        drupal_goto('cap/');
+        drupal_goto(variable_get('cap_base_uri'));
      */
 //////// put in validation to check that any entry [Na] has justification [Nb]
 
@@ -695,7 +720,7 @@ function gene_info_submission_form_submit($form, &$form_state) {
 //    $count = 0;
 
    //   drupal_set_message('We are not currently accepting fasta or xls format files.','warning');
-     // drupal_goto('cap/');
+     // drupal_goto(variable_get('cap_base_uri'));
 //    $result = db_query("SELECT count(1) as count from {cap_file_node} where file_md5 = '".$md5."'");
     
    // foreach ($result as $row) { 
@@ -704,7 +729,7 @@ function gene_info_submission_form_submit($form, &$form_state) {
 
 //    if ($count > 0) {
  //       drupal_set_message('We have already received a file with this md5 sum.','warning');
- //       drupal_goto('cap/');
+ //       drupal_goto(variable_get('cap_base_uri'));
         ////  }
         //
         //
@@ -715,7 +740,7 @@ function gene_info_submission_form_submit($form, &$form_state) {
         //
         //
         //
-//        drupal_goto('cap/');
+//        drupal_goto(variable_get('cap_base_uri'));
     
 }
 
@@ -815,7 +840,8 @@ function gene_info_submission_form($form, &$form_state) { // the error was all t
         if(count($response)==1) {
             // exit;
             $gene_info_switch = 1;
-        } elseif (count($response)==13) {
+        } elseif (count($response)>=3) {
+        //} elseif (count($response)==13) {
         //// already edited
             // exit;
             $ret=-1;
@@ -1778,6 +1804,10 @@ function gff_submission_form_validate($form, &$form_state) {
 
 function grab_json($what = NULL ,$format = NULL) {
 
+    if($GLOBALS['user']->uid != variable_get('cap_admin_uid')) { 
+        return drupal_access_denied();  
+    }
+
     //// don't check for if the file is in the db?!?
     // print "\n$what\n";
     // exit;
@@ -1909,6 +1939,10 @@ function grab_json($what = NULL ,$format = NULL) {
 // print upload history
 function uploaded_files_list() {
 
+    if($GLOBALS['user']->uid != variable_get('cap_admin_uid')) { 
+        return drupal_access_denied();  
+    }
+
     $result = db_query("SELECT sbm_id, submitter_name,user,user_email,uid,ip,species_version,file_name,file_type,file_md5,file_size,file_desc,timestamp FROM {cap_file_node}");
     $string = '';
     $list = array();
@@ -1937,7 +1971,7 @@ function gff_submission_form_submit($form, &$form_state) {
 
     if ($format != 'gff3') {
         drupal_set_message('We are not currently accepting fasta or xls format files.','warning');
-        drupal_goto('cap/');
+        drupal_goto(variable_get('cap_base_uri'));
     } 
     //////////////// using envs...
     /* $host = getenv('CAP_HOST');
@@ -1953,7 +1987,7 @@ function gff_submission_form_submit($form, &$form_state) {
         $out=drupal_mail('GeneAnnotation', 'notice',  'dsth@ebi.ac.uk', language_default(), $params, 'cap_qc@vectorbase.org',TRUE);
         drupal_set_message('Filenames must consist of entirely alphanumeric characters (in the range a-z A-Z 0-9) or "_", "-" and "." (no spaces or non-ASCI chars).',
           'warning');
-        drupal_goto('cap/');
+        drupal_goto(variable_get('cap_base_uri'));
     }
 
     // $params = array('body' => 'As above.','subject' => '[Cap] file : Submit pressed', );
@@ -1973,7 +2007,7 @@ function gff_submission_form_submit($form, &$form_state) {
 
     if ($count > 0) {
         //drupal_set_message('We have already received a file with this md5 sum.','warning');
-        // drupal_goto('cap/');
+        // drupal_goto(variable_get('cap_base_uri'));
     } 
     
     $message = '<p>received file ' 
@@ -2203,6 +2237,10 @@ $form['dwnld']['format'] = array(
 
 function meta_data_list() {
 
+    if($GLOBALS['user']->uid != variable_get('cap_admin_uid')) { 
+        return drupal_access_denied();  
+    }
+
     /*
 +----------------+------------------+------+-----+---------+----------------+
 | Field          | Type             | Null | Key | Default | Extra          |
@@ -2351,7 +2389,7 @@ if ($form_state['values']['format']=='gff') {
 
     if ($exists == '') { 
         drupal_set_message('The requested contig does not exist or is too short (<5 Kbp) and was excluded from the automatic annotation process.','error');
-        drupal_goto('cap/');
+        drupal_goto(variable_get('cap_base_uri'));
     }
 
     $start = $form_state['values']['start'];
@@ -2377,16 +2415,16 @@ if ($form_state['values']['format']=='gff') {
 
     if (!file_exists($filepath)) { 
         drupal_set_message('There was a problem generating gff for the selected region','error');
-        drupal_goto('cap/');
+        drupal_goto(variable_get('cap_base_uri'));
     } elseif (filesize($filepath) == 0) {
         drupal_set_message('The requested region contains no gff features','warning'); 
         unlink($filepath);
-        drupal_goto('cap/');
+        drupal_goto(variable_get('cap_base_uri'));
     } elseif (filesize($filepath) > $filelimit) {
         $filelimit = sprintf("%.2f",$filelimit/(1024^2));
         drupal_set_message('The gff file for the requested region is greater than '.$filelimit.'Mb - please select a smaller region','warning'); 
         unlink($filepath);
-        drupal_goto('cap/');
+        drupal_goto(variable_get('cap_base_uri'));
     } else {
         // drupal_set_message('download file generated');
         drupal_goto('cap/'.$ofile.'/gff');
@@ -2407,16 +2445,16 @@ if ($form_state['values']['format']=='gff') {
 
     if (!file_exists($filepath)) { 
         drupal_set_message('There was a problem extracting sequence for scaffold '.$contigname,'error');
-        drupal_goto('cap/');
+        drupal_goto(variable_get('cap_base_uri'));
     } elseif (filesize($filepath) == 0) {
         drupal_set_message('There was a problem extracting sequence for scaffold '.$contigname,'warning');
         unlink($filepath);
-        drupal_goto('cap/');
+        drupal_goto(variable_get('cap_base_uri'));
     } elseif (filesize($filepath) > $filelimit) {
         $filelimit = sprintf("%.2f",$filelimit/(1024^2));
         drupal_set_message('The fasta for the requested scaffold is greater than '.$filelimit.'Mb - please download from ftp server','warning'); 
         unlink($filepath);
-        drupal_goto('cap/');
+        drupal_goto(variable_get('cap_base_uri'));
     } else {
         // drupal_set_message('download file generated');
         drupal_goto('cap/'.$ofile.'/gff');
