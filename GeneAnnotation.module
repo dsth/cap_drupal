@@ -1652,7 +1652,7 @@ function check_gene_entry($gene_id) {
 // deprecated?!?
 function ajax_callback_for_meta_table($form, $form_state) {
     
-    $return = check_gene_entry($form_state['values']['howmany_select']);
+    // $return = check_gene_entry($form_state['values']['howmany_select']);
     
     
     
