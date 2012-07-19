@@ -182,6 +182,14 @@ function GeneAnnotation_menu() {
         'access arguments' => array('access content')
     );
 
+    $items['nd_cap'] = array(
+        'title' => 'Community Annotation Portal',
+        'page callback' => 'cap_frontpage',
+        'access callback' => TRUE,
+        'access arguments' => array('access content')
+    );
+
+
     $items['cap/%/gff'] = array(
         'title'            => 'Download file',
         'page callback'	   => 'download_gff_file',
