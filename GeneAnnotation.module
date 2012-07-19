@@ -2024,12 +2024,15 @@ function gff_submission_form_submit($form, &$form_state) {
       . $_FILES['files']['size']['upload']  
       . ' bytes/';
 
+    $user_col = (variable_get('cap_base_uri')=="nd_cap/") ? "name" : "user";
+    $user_email = (variable_get('cap_base_uri')=="nd_cap/") ? "name_email" : "user_email";
+
     $sbmid = db_insert('cap_file_node')->fields(
         array(
-            'user' => $GLOBALS['user']->name,
+            $user_col => $GLOBALS['user']->name,
             'uid' => $GLOBALS['user']->uid,
             'submitter_name' => $sbmname,
-            'user_email' => $GLOBALS['user']->mail,
+            $user_email => $GLOBALS['user']->mail,
             'ip' => $GLOBALS['user']->hostname,
             'species_version' => $species,
             'file_name' => $tmpfile,
@@ -2039,6 +2042,7 @@ function gff_submission_form_submit($form, &$form_state) {
             'file_size' => $size,
         )
     )->execute();
+
 
     $sbmidstr = sprintf("%06s",$sbmid);
     $newfile = strip('sbm'.$sbmidstr.'_'.$tmpfile);
