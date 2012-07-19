@@ -51,7 +51,9 @@ function ClientLogin($service,$user,$pass) {
         $retValue = curl_exec($ch);                      
         curl_close($ch);
  */
-    return trim(`curl -x www-proxy.ebi.ac.uk:3128 -s -d Email=$user -d Passwd=$pass -d service=$service https://www.google.com/accounts/ClientLogin | tr ' ' \\n | grep Auth= | sed -e 's/Auth=//'`);
+
+    $proxy = (variable_get('cap_base_uri')=="nd_cap/") ? "" : "-x www-proxy.ebi.ac.uk:3128";
+    return trim(`curl $proxy -s -d Email=$user -d Passwd=$pass -d service=$service https://www.google.com/accounts/ClientLogin | tr ' ' \\n | grep Auth= | sed -e 's/Auth=//'`);
     // return "curl -x www-proxy.ebi.ac.uk:3128 -s -d Email=$user -d Passwd=$pass -d service=$service https://www.google.com/accounts/ClientLogin";
     // return "curl -s -d Email=$user -d Passwd=$pass -d service=$service https://www.google.com/accounts/ClientLogin | tr ' ' \\n | grep Auth= | sed -e 's/Auth=//'";
 }
@@ -70,7 +72,8 @@ function FusionTablePost($user,$pass,$service,$url,$sql) {
     ///// seems we have a v. old version of curl on treason?!? so instead of using --data-urlencode we'll just use POST?!? - while the documentation says to use GET/POST in difference situations
     ///// seems both are fine?!?
     // $cmd="curl -x www-proxy.ebi.ac.uk:3128 -L -s -H \"Authorization: GoogleLogin auth=$auth\" --data-urlencode sql=\"$sql\" $url";
-    $cmd="curl -x www-proxy.ebi.ac.uk:3128 -L -s -H \"Authorization: GoogleLogin auth=$auth\" -d sql=\"$sql\" $url";
+    $proxy = (variable_get('cap_base_uri')=="nd_cap/") ? "" : "-x www-proxy.ebi.ac.uk:3128";
+    $cmd="curl $proxy -L -s -H \"Authorization: GoogleLogin auth=$auth\" -d sql=\"$sql\" $url";
     $out=`$cmd | grep -v Gene_Cap_ID`;
     $rs=explode(",",trim($out));
     ////////////////////////////////////////////////////////////////////////////
@@ -1249,8 +1252,10 @@ function download_page($path){
         curl_setopt($ch, CURLOPT_RETURNTRANSFER,1);
         curl_setopt($ch, CURLOPT_TIMEOUT, 15);
         ///// since this runs on treason etc., you must go via webproxy to make it work!?!?
-        curl_setopt($ch, CURLOPT_PROXY, "www-proxy.ebi.ac.uk");
-        curl_setopt($ch, CURLOPT_PROXYPORT, 3128);
+        if(variable_get('cap_base_uri')=="cap/") {
+            curl_setopt($ch, CURLOPT_PROXY, "www-proxy.ebi.ac.uk");
+            curl_setopt($ch, CURLOPT_PROXYPORT, 3128);
+        }
         $retValue = curl_exec($ch);                      
         curl_close($ch);
         return $retValue;
