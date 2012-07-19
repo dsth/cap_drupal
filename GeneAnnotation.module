@@ -204,6 +204,13 @@ function GeneAnnotation_menu() {
 
     $items['uploaded'] = array(
         'page callback' => 'uploaded_files_list',
+        'access callback' => TRUE,
+        'access arguments' => array('access content')
+    );
+
+    $items['nd_uploaded'] = array(
+        'page callback' => 'uploaded_files_list',
+        'access callback' => TRUE,
         'access arguments' => array('access content')
     );
 
@@ -1951,7 +1958,10 @@ function uploaded_files_list() {
         return drupal_access_denied();  
     }
 
-    $result = db_query("SELECT sbm_id, submitter_name,user,user_email,uid,ip,species_version,file_name,file_type,file_md5,file_size,file_desc,timestamp FROM {cap_file_node}");
+    $user_col = (variable_get('cap_base_uri')=="nd_cap/") ? "name" : "user";
+    $user_email = (variable_get('cap_base_uri')=="nd_cap/") ? "name_email" : "user_email";
+
+    $result = db_query("SELECT sbm_id, submitter_name,$user_col,$user_email,uid,ip,species_version,file_name,file_type,file_md5,file_size,file_desc,timestamp FROM {cap_file_node}");
     $string = '';
     $list = array();
     foreach ($result as $row) {
